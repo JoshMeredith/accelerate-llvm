@@ -113,6 +113,24 @@ mkStencil_2D uid stencilN jBounds nBounds aenv stenElem =
         let ix = IR (OP_Pair (OP_Pair OP_Unit y) x)
         i <- intOfIndex (irArrayShape arrOut) ix
         writeArray arrOut i =<< stenElem bounds ix
+      --
+      mk_region unrollN region bounds x0 x1 y0 y1 =
+        makeOpenAcc uid (Label $ stencilN <> region) params $ do
+          yrange    <- sub numType y1 y0
+          remainder <- A.rem integralType yrange (int unrollN)
+          y'        <- sub numType y1 remainder
+          -- Evaluate most rows in groups of 4
+          imapFromStepTo y0 (int unrollN) y' $ \y -> do
+            ys <- forM [1..(unrollN-1)] $ \dy -> add numType y (int dy)
+            imapFromTo x0 x1 $ \x -> do
+              forM_ (y:ys) $ \y_tile -> do
+                evalElem bounds x y_tile
+          -- Evaluate the remaining rows singularly
+          imapFromTo y' y1 $ \y ->
+            imapFromTo x0 x1 $ \x ->
+              evalElem bounds x y
+          --
+          return_
   in
     foldr1 (+++) <$> sequence
       --
@@ -158,6 +176,7 @@ mkStencil_2D uid stencilN jBounds nBounds aenv stenElem =
           return_
       --
       ]
+
 
 gangParam2D :: ( IR Int, IR Int, IR Int
                , IR Int, IR Int, IR Int, [LLVM.Parameter])
